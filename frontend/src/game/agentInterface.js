@@ -28,6 +28,40 @@ export function stepRelative(state, action) {
   return step(state, nextDir);
 }
 
+function floodFillReachable(state, start, limit) {
+  if (start.x < 0 || start.x >= GRID_SIZE || start.y < 0 || start.y >= GRID_SIZE) return 0;
+
+  const blocked = new Set(state.snake.slice(0, -1).map((seg) => `${seg.x},${seg.y}`));
+  if (blocked.has(`${start.x},${start.y}`)) return 0;
+
+  const visited = new Set([`${start.x},${start.y}`]);
+  const queue = [start];
+  let count = 1;
+
+  while (queue.length && count < limit) {
+    const cur = queue.shift();
+    for (const dir of ALL_DIRECTIONS) {
+      const next = { x: cur.x + dir.x, y: cur.y + dir.y };
+      const key = `${next.x},${next.y}`;
+      if (next.x < 0 || next.x >= GRID_SIZE || next.y < 0 || next.y >= GRID_SIZE) continue;
+      if (visited.has(key) || blocked.has(key)) continue;
+      visited.add(key);
+      queue.push(next);
+      count++;
+      if (count >= limit) break;
+    }
+  }
+
+  return count;
+}
+
+function isTrapped(state, dir) {
+  const head = state.snake[0];
+  const next = { x: head.x + dir.x, y: head.y + dir.y };
+  const reachable = floodFillReachable(state, next, state.snake.length);
+  return reachable < state.snake.length;
+}
+
 function isDangerTwoAhead(state, dir) {
 
   const head = state.snake[0];
@@ -59,6 +93,9 @@ export function getAgentState(state) {
     dangerStraight2: isDangerTwoAhead(state, dir),
     dangerLeft2: isDangerTwoAhead(state, left),
     dangerRight2: isDangerTwoAhead(state, right),
+    trapStraight: isTrapped(state, dir),
+    trapLeft: isTrapped(state, left),
+    trapRight: isTrapped(state, right),
     movingUp: dir === DIRECTIONS.UP,
     movingDown: dir === DIRECTIONS.DOWN,
     movingLeft: dir === DIRECTIONS.LEFT,
