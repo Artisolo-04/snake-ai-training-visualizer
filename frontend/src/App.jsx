@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngine';
 import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
 import { createAgent, trainAgent } from './ai/qlearning';
+import { saveRun, listRuns, loadRun } from './api/runs';
 import Sparkline from './components/Sparkline';
 import './index.css';
 
@@ -25,6 +26,34 @@ function App() {
 
   const [trainingHistory, setTrainingHistory] = useState([]);
   const [aiSpeed, setAiSpeed] = useState(80);
+  const [savedRuns, setSavedRuns] = useState([]);
+
+  const refreshRunsList = useCallback(async () => {
+    try {
+      setSavedRuns(await listRuns());
+    } catch (err) {
+      console.error('Could not load runs list:', err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshRunsList();
+  }, [refreshRunsList]);
+
+  const handleLoadRun = async (id) => {
+    if (!id) return;
+    try {
+      const run = await loadRun(id);
+      const loadedAgent = createAgent();
+      loadedAgent.qTable = new Map(Object.entries(run.q_table));
+      loadedAgent.epsilon = run.final_epsilon;
+      setAgent(loadedAgent);
+      setTrainedEpisodes(run.episodes);
+      setTrainingHistory([]);
+    } catch (err) {
+      console.error('Could not load run:', err.message);
+    }
+  };
 
   const restart = useCallback(() => {
     directionRef.current = DIRECTIONS.RIGHT;
@@ -112,13 +141,26 @@ function App() {
 
   const handleTrain = () => {
     setTraining(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const newAgent = createAgent();
       const history = trainAgent(newAgent, 1000);
       setAgent(newAgent);
       setTrainedEpisodes(1000);
       setTrainingHistory(history);
       setTraining(false);
+
+      try {
+        const bestScore = Math.max(...history.map((h) => h.score));
+        await saveRun({
+          episodes: 1000,
+          bestScore,
+          finalEpsilon: newAgent.epsilon,
+          qTable: Object.fromEntries(newAgent.qTable),
+        });
+        refreshRunsList();
+      } catch (err) {
+        console.error('Could not save run:', err.message);
+      }
     }, 50);
   };
 
@@ -174,10 +216,19 @@ function App() {
             >
               {training ? 'Training…' : 'Train 1000 Episodes'}
             </button>
-            {trainedEpisodes > 0 && (
-              <span className="font-mono text-xs text-muted uppercase tracking-widest">
-                Trained on {trainedEpisodes} episodes · {agent.qTable.size} states learned
-              </span>
+            {savedRuns.length > 0 && (
+              <select
+                onChange={(e) => handleLoadRun(e.target.value)}
+                defaultValue=""
+                className="bg-panel border border-line text-muted font-mono text-xs uppercase tracking-widest px-3 py-2 rounded-sm"
+              >
+                <option value="" disabled>Load past run</option>
+                {savedRuns.map((run) => (
+                  <option key={run.id} value={run.id}>
+                    #{run.id} · {run.episodes}ep · best {run.best_score}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
 
