@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngine';
 import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
-import { createAgent, trainAgentAsync } from './ai/qlearning';
+import { createAgent } from './ai/qlearning';
 import { saveRun, listRuns, loadRun } from './api/runs';
 import RunSelector from './components/RunSelector';
 import Sparkline from './components/Sparkline';
+import NeuralNetLoader from './components/NeuralNetLoader';
 import './index.css';
 
 const CELL_SIZE = 20;
@@ -21,6 +22,8 @@ function App() {
   const [started, setStarted] = useState(false);
   const directionRef = useRef(DIRECTIONS.RIGHT);
   const gameOverRef = useRef(false);
+  const trainWorkerRef = useRef(null);
+
   gameOverRef.current = gameState.gameOver;
 
   const [agent, setAgent] = useState(null);
@@ -31,6 +34,18 @@ function App() {
   const [trainingHistory, setTrainingHistory] = useState([]);
   const [aiSpeed, setAiSpeed] = useState(80);
   const [savedRuns, setSavedRuns] = useState([]);
+
+  const bestScoreEver = Math.max(
+    0,
+    ...savedRuns.map((r) => r.best_score ?? 0),
+    ...(trainingHistory.length ? [Math.max(...trainingHistory.map((h) => h.score))] : [])
+  );
+  const avgLast100 = trainingHistory.length
+    ? (
+        trainingHistory.slice(-100).reduce((sum, h) => sum + h.score, 0) /
+        Math.min(100, trainingHistory.length)
+      ).toFixed(1)
+    : null;
 
   const refreshRunsList = useCallback(async () => {
     try {
@@ -146,32 +161,63 @@ function App() {
   const handleTrain = () => {
     setTraining(true);
     setTrainProgress(0);
-    setTimeout(async () => {
-      const newAgent = createAgent();
-      const history = await trainAgentAsync(newAgent, EPISODES_PER_TRAIN, {
-        batchSize: TRAIN_BATCH_SIZE,
-        onProgress: (done, total) => setTrainProgress(Math.round((done / total) * 100)),
-      });
-      setAgent(newAgent);
-      setTrainedEpisodes(EPISODES_PER_TRAIN);
-      setTrainingHistory(history);
-      setTraining(false);
-      setStarted(true);
 
-      try {
-        const bestScore = Math.max(...history.map((h) => h.score));
-        await saveRun({
-          episodes: EPISODES_PER_TRAIN,
-          bestScore,
-          finalEpsilon: newAgent.epsilon,
-          qTable: Object.fromEntries(newAgent.qTable),
-        });
-        refreshRunsList();
-      } catch (err) {
-        console.error('Could not save run:', err.message);
+    const worker = new Worker(new URL('./workers/trainWorker.js', import.meta.url), { type: 'module' });
+    trainWorkerRef.current = worker;
+
+    worker.onmessage = (e) => {
+      const { type } = e.data;
+
+      if (type === 'progress') {
+        setTrainProgress(Math.round((e.data.done / e.data.total) * 100));
       }
-    }, 50);
+
+      if (type === 'done') {
+        const newAgent = createAgent();
+        newAgent.qTable = new Map(e.data.qTable);
+        newAgent.epsilon = e.data.epsilon;
+
+        setAgent(newAgent);
+        setTrainedEpisodes(EPISODES_PER_TRAIN);
+        setTrainingHistory(e.data.history);
+        setTraining(false);
+        setStarted(true);
+        worker.terminate();
+        trainWorkerRef.current = null;
+
+        (async () => {
+          try {
+            const bestScore = Math.max(...e.data.history.map((h) => h.score));
+            await saveRun({
+              episodes: EPISODES_PER_TRAIN,
+              bestScore,
+              finalEpsilon: newAgent.epsilon,
+              qTable: Object.fromEntries(newAgent.qTable),
+            });
+            refreshRunsList();
+          } catch (err) {
+            console.error('Could not save run:', err.message);
+          }
+        })();
+      }
+
+      if (type === 'cancelled') {
+        setTraining(false);
+        worker.terminate();
+        trainWorkerRef.current = null;
+      }
+    };
+
+    worker.postMessage({ type: 'start', episodes: EPISODES_PER_TRAIN, batchSize: TRAIN_BATCH_SIZE });
   };
+
+  const handleStopTraining = () => {
+    trainWorkerRef.current?.postMessage({ type: 'cancel' });
+  };
+
+  useEffect(() => {
+    return () => trainWorkerRef.current?.terminate();
+  }, []);
 
 
   const switchMode = (newMode) => {
@@ -225,10 +271,31 @@ function App() {
             >
               {training ? `Training… ${trainProgress}%` : `Train ${EPISODES_PER_TRAIN} Episodes`}
             </button>
+            {training && (
+              <button
+                onClick={handleStopTraining}
+                className="px-4 py-2 border border-line text-danger hover:bg-danger/10 font-mono text-xs uppercase tracking-wide rounded-sm transition-colors"
+              >
+                Stop
+              </button>
+            )}
             {savedRuns.length > 0 && (
               <RunSelector runs={savedRuns} onSelect={handleLoadRun} />
             )}
           </div>
+
+          {(bestScoreEver > 0 || avgLast100) && (
+            <div className="flex items-center gap-5 font-mono text-[10px] uppercase tracking-widest text-muted">
+              <span>
+                Best Ever <span className="text-amber text-xs">{String(bestScoreEver).padStart(3, '0')}</span>
+              </span>
+              {avgLast100 && (
+                <span>
+                  Avg (last 100) <span className="text-teal text-xs">{avgLast100}</span>
+                </span>
+              )}
+            </div>
+          )}
 
           {trainingHistory.length > 0 && (
             <div className="flex gap-4">
@@ -279,7 +346,19 @@ function App() {
           className="border border-line rounded-sm bg-panel"
         />
 
-        {gameState.gameOver && (
+        {training && mode === 'ai' && (
+          <div className="absolute inset-0 bg-ink/90 backdrop-blur-sm rounded-sm">
+            <NeuralNetLoader progress={trainProgress} />
+          </div>
+        )}
+
+        {training && mode === 'manual' && (
+          <div className="absolute top-2 right-2 px-2 py-1 bg-ink/80 border border-line rounded-sm font-mono text-[10px] text-teal">
+            Training… {trainProgress}%
+          </div>
+        )}
+
+        {!training && gameState.gameOver && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/85 backdrop-blur-sm">
             <p className="font-mono text-xs uppercase tracking-[0.3em] text-danger">
               Run Terminated
