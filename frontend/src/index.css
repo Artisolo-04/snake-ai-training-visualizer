@@ -20,3 +20,17 @@ body {
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: 28px 28px;
 }
+
+.runs-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.runs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.runs-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--color-line);
+  border-radius: 4px;
+}
+.runs-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-teal);
+}

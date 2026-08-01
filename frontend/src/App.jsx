@@ -3,6 +3,7 @@ import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngi
 import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
 import { createAgent, trainAgent } from './ai/qlearning';
 import { saveRun, listRuns, loadRun } from './api/runs';
+import RunSelector from './components/RunSelector';
 import Sparkline from './components/Sparkline';
 import './index.css';
 
@@ -217,18 +218,7 @@ function App() {
               {training ? 'Training…' : 'Train 1000 Episodes'}
             </button>
             {savedRuns.length > 0 && (
-              <select
-                onChange={(e) => handleLoadRun(e.target.value)}
-                defaultValue=""
-                className="bg-panel border border-line text-muted font-mono text-xs uppercase tracking-widest px-3 py-2 rounded-sm"
-              >
-                <option value="" disabled>Load past run</option>
-                {savedRuns.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    #{run.id} · {run.episodes}ep · best {run.best_score}
-                  </option>
-                ))}
-              </select>
+              <RunSelector runs={savedRuns} onSelect={handleLoadRun} />
             )}
           </div>
 
