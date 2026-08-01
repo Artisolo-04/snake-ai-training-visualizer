@@ -85,12 +85,17 @@ export function trainAgent(agent, episodes) {
   return history;
 }
 
-export function trainAgentAsync(agent, episodes, { batchSize = 100, onProgress } = {}) {
+export function trainAgentAsync(agent, episodes, { batchSize = 100, onProgress, shouldContinue } = {}) {
   return new Promise((resolve) => {
     const history = [];
     let done = 0;
 
     function runBatch() {
+      if (shouldContinue && !shouldContinue()) {
+        resolve(history);
+        return;
+      }
+
       const end = Math.min(done + batchSize, episodes);
       for (let i = done; i < end; i++) {
         history.push(runEpisode(agent));
@@ -99,7 +104,7 @@ export function trainAgentAsync(agent, episodes, { batchSize = 100, onProgress }
 
       if (onProgress) onProgress(done, episodes);
 
-      if (done < episodes) {
+      if (done < episodes && (!shouldContinue || shouldContinue())) {
         setTimeout(runBatch, 0);
       } else {
         resolve(history);
