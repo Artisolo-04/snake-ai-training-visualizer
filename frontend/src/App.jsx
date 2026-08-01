@@ -47,7 +47,7 @@ function App() {
     ...savedRuns.map((r) => r.best_score ?? 0),
     ...(trainingHistory.length ? [Math.max(...trainingHistory.map((h) => h.score))] : [])
   );
-  
+
   const avgLast100 = trainingHistory.length
     ? (
         trainingHistory.slice(-100).reduce((sum, h) => sum + h.score, 0) /
@@ -166,36 +166,85 @@ function App() {
   }, [gameState]);
 
 
+  const NUM_WORKERS = Math.min(navigator.hardwareConcurrency || 4, 4);
+
+  function mergeQTables(qTablesArrays) {
+    const merged = new Map();
+    const counts = new Map();
+
+    for (const entries of qTablesArrays) {
+      for (const [key, values] of entries) {
+        if (!merged.has(key)) {
+          merged.set(key, [0, 0, 0]);
+          counts.set(key, 0);
+        }
+        const acc = merged.get(key);
+        for (let i = 0; i < 3; i++) acc[i] += values[i];
+        counts.set(key, counts.get(key) + 1);
+      }
+    }
+
+    for (const [key, acc] of merged) {
+      const n = counts.get(key);
+      for (let i = 0; i < 3; i++) acc[i] /= n;
+    }
+
+    return merged;
+  }
+
+  function interleaveHistories(historyArrays) {
+    const maxLen = Math.max(...historyArrays.map((h) => h.length));
+    const result = [];
+
+    for (let i = 0; i < maxLen; i++) {
+      for (const history of historyArrays) {
+        if (i < history.length) result.push(history[i]);
+      }
+    }
+
+    return result;
+  }
+
   const handleTrain = () => {
     setTraining(true);
     setTrainProgress(0);
 
-    const worker = new Worker(new URL('./workers/trainWorker.js', import.meta.url), { type: 'module' });
-    trainWorkerRef.current = worker;
+    const episodesPerWorker = Math.ceil(EPISODES_PER_TRAIN / NUM_WORKERS);
+    const workers = [];
+    const results = new Array(NUM_WORKERS).fill(null);
+    const doneCounts = new Array(NUM_WORKERS).fill(0);
+    let cancelled = false;
 
-    worker.onmessage = (e) => {
-      const { type } = e.data;
+    trainWorkerRef.current = { workers, cancel: () => { cancelled = true; workers.forEach((w) => w.postMessage({ type: 'cancel' })); } };
 
-      if (type === 'progress') {
-        setTrainProgress(Math.round((e.data.done / e.data.total) * 100));
-      }
+    const checkAllDone = () => {
+      if (results.every((r) => r !== null)) {
+        if (cancelled) {
+          setTraining(false);
+          workers.forEach((w) => w.terminate());
+          trainWorkerRef.current = null;
+          return;
+        }
 
-      if (type === 'done') {
+        const qTable = mergeQTables(results.map((r) => r.qTable));
+        const history = interleaveHistories(results.map((r) => r.history));
+        const finalEpsilon = Math.min(...results.map((r) => r.epsilon));
+
         const newAgent = createAgent();
-        newAgent.qTable = new Map(e.data.qTable);
-        newAgent.epsilon = e.data.epsilon;
+        newAgent.qTable = qTable;
+        newAgent.epsilon = finalEpsilon;
 
         setAgent(newAgent);
         setTrainedEpisodes(EPISODES_PER_TRAIN);
-        setTrainingHistory(e.data.history);
+        setTrainingHistory(history);
         setTraining(false);
         setStarted(true);
-        worker.terminate();
+        workers.forEach((w) => w.terminate());
         trainWorkerRef.current = null;
 
         (async () => {
           try {
-            const bestScore = Math.max(...e.data.history.map((h) => h.score));
+            const bestScore = Math.max(...history.map((h) => h.score));
             await saveRun({
               episodes: EPISODES_PER_TRAIN,
               bestScore,
@@ -208,25 +257,45 @@ function App() {
           }
         })();
       }
-
-      if (type === 'cancelled') {
-        setTraining(false);
-        worker.terminate();
-        trainWorkerRef.current = null;
-      }
     };
 
-    worker.postMessage({ type: 'start', episodes: EPISODES_PER_TRAIN, batchSize: TRAIN_BATCH_SIZE });
+    for (let i = 0; i < NUM_WORKERS; i++) {
+      const worker = new Worker(new URL('./workers/trainWorker.js', import.meta.url), { type: 'module' });
+      workers.push(worker);
+
+      worker.onmessage = (e) => {
+        const { type } = e.data;
+
+        if (type === 'progress') {
+          doneCounts[i] = e.data.done;
+          const totalDone = doneCounts.reduce((a, b) => a + b, 0);
+          setTrainProgress(Math.round((totalDone / EPISODES_PER_TRAIN) * 100));
+        }
+
+        if (type === 'done') {
+          results[i] = { qTable: e.data.qTable, history: e.data.history, epsilon: e.data.epsilon };
+          worker.terminate();
+          checkAllDone();
+        }
+
+        if (type === 'cancelled') {
+          results[i] = { qTable: [], history: [], epsilon: 1 };
+          worker.terminate();
+          checkAllDone();
+        }
+      };
+
+      worker.postMessage({ type: 'start', episodes: episodesPerWorker, batchSize: TRAIN_BATCH_SIZE });
+    }
   };
 
   const handleStopTraining = () => {
-    trainWorkerRef.current?.postMessage({ type: 'cancel' });
+    trainWorkerRef.current?.cancel();
   };
 
   useEffect(() => {
-    return () => trainWorkerRef.current?.terminate();
+    return () => trainWorkerRef.current?.cancel();
   }, []);
-
 
   const switchMode = (newMode) => {
     setMode(newMode);
