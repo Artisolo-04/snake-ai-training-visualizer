@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngine';
 import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
 import { createAgent, trainAgent } from './ai/qlearning';
+import Sparkline from './components/Sparkline';
 import './index.css';
 
 const CELL_SIZE = 20;
 const TICK_MS = 120;
-const AI_TICK_MS = 80;
 
 function App() {
 
@@ -22,6 +22,9 @@ function App() {
   const [agent, setAgent] = useState(null);
   const [training, setTraining] = useState(false);
   const [trainedEpisodes, setTrainedEpisodes] = useState(0);
+
+  const [trainingHistory, setTrainingHistory] = useState([]);
+  const [aiSpeed, setAiSpeed] = useState(80);
 
   const restart = useCallback(() => {
     directionRef.current = DIRECTIONS.RIGHT;
@@ -72,9 +75,9 @@ function App() {
         const action = ['straight', 'left', 'right'][bestActionIndex];
         return stepRelative(prev, action);
       });
-    }, AI_TICK_MS);
+    }, aiSpeed);
     return () => clearInterval(interval);
-  }, [mode, agent, gameState.gameOver, started]);
+  }, [mode, agent, gameState.gameOver, started, aiSpeed]);
 
 
   useEffect(() => {
@@ -111,9 +114,10 @@ function App() {
     setTraining(true);
     setTimeout(() => {
       const newAgent = createAgent();
-      trainAgent(newAgent, 1000);
+      const history = trainAgent(newAgent, 1000);
       setAgent(newAgent);
       setTrainedEpisodes(1000);
+      setTrainingHistory(history);
       setTraining(false);
     }, 50);
   };
@@ -161,18 +165,54 @@ function App() {
       </div>
 
       {mode === 'ai' && (
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleTrain}
-            disabled={training}
-            className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
-          >
-            {training ? 'Training…' : 'Train 1000 Episodes'}
-          </button>
-          {trainedEpisodes > 0 && (
-            <span className="font-mono text-xs text-muted uppercase tracking-widest">
-              Trained on {trainedEpisodes} episodes · {agent.qTable.size} states learned
-            </span>
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleTrain}
+              disabled={training}
+              className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
+            >
+              {training ? 'Training…' : 'Train 1000 Episodes'}
+            </button>
+            {trainedEpisodes > 0 && (
+              <span className="font-mono text-xs text-muted uppercase tracking-widest">
+                Trained on {trainedEpisodes} episodes · {agent.qTable.size} states learned
+              </span>
+            )}
+          </div>
+
+          {trainingHistory.length > 0 && (
+            <div className="flex gap-4">
+              <Sparkline
+                data={trainingHistory.map((h) => h.score)}
+                label="Score / Episode"
+                valueLabel={`best ${Math.max(...trainingHistory.map((h) => h.score))}`}
+                color="#5ccfe6"
+                smooth
+              />
+              <Sparkline
+                data={trainingHistory.map((h) => h.epsilon)}
+                label="Epsilon (exploration)"
+                valueLabel={trainingHistory[trainingHistory.length - 1].epsilon.toFixed(3)}
+                color="#ffb454"
+              />
+            </div>
+          )}
+
+          {agent && (
+            <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted">
+              <span>Speed</span>
+              <input
+                type="range"
+                min="20"
+                max="300"
+                step="10"
+                value={310 - aiSpeed}
+                onChange={(e) => setAiSpeed(310 - Number(e.target.value))}
+                className="w-32 accent-teal"
+              />
+              <span className="text-teal">{aiSpeed}ms/step</span>
+            </div>
           )}
         </div>
       )}
