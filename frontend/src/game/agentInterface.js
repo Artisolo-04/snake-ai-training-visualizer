@@ -28,26 +28,45 @@ export function stepRelative(state, action) {
   return step(state, nextDir);
 }
 
+function isDangerTwoAhead(state, dir) {
+
+  const head = state.snake[0];
+
+  const oneStep = { x: head.x + dir.x, y: head.y + dir.y };
+  const twoStep = { x: head.x + dir.x * 2, y: head.y + dir.y * 2 };
+
+  if (twoStep.x < 0 || twoStep.x >= GRID_SIZE || twoStep.y < 0 || twoStep.y >= GRID_SIZE) return true;
+
+  const bodyToCheck = state.snake.slice(0, -1);
+
+  return bodyToCheck.some(
+    (seg) => (seg.x === oneStep.x && seg.y === oneStep.y) || (seg.x === twoStep.x && seg.y === twoStep.y)
+  );
+
+}
+
 export function getAgentState(state) {
+  
   const dir = state.direction;
   const left = turnLeft(dir);
   const right = turnRight(dir);
   const head = state.snake[0];
 
   return {
-    dangerStraight : isDanger(state, dir),
-    dangerLeft     : isDanger(state, left),
-    dangerRight    : isDanger(state, right),
-
-    movingUp       : dir === DIRECTIONS.UP,
-    movingDown     : dir === DIRECTIONS.DOWN,
-    movingLeft     : dir === DIRECTIONS.LEFT,
-    movingRight    : dir === DIRECTIONS.RIGHT,
-
-    foodUp         : state.food.y < head.y,
-    foodDown       : state.food.y > head.y,
-    foodLeft       : state.food.x < head.x,
-    foodRight      : state.food.x > head.x,
+    dangerStraight: isDanger(state, dir),
+    dangerLeft: isDanger(state, left),
+    dangerRight: isDanger(state, right),
+    dangerStraight2: isDangerTwoAhead(state, dir),
+    dangerLeft2: isDangerTwoAhead(state, left),
+    dangerRight2: isDangerTwoAhead(state, right),
+    movingUp: dir === DIRECTIONS.UP,
+    movingDown: dir === DIRECTIONS.DOWN,
+    movingLeft: dir === DIRECTIONS.LEFT,
+    movingRight: dir === DIRECTIONS.RIGHT,
+    foodUp: state.food.y < head.y,
+    foodDown: state.food.y > head.y,
+    foodLeft: state.food.x < head.x,
+    foodRight: state.food.x > head.x,
   };
 }
 
