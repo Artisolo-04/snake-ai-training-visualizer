@@ -36,10 +36,18 @@ function chooseAction(agent, stateKey) {
   return qValues.indexOf(Math.max(...qValues));
 }
 
+function manhattanDistance(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
 function computeReward(prevState, nextState) {
   if (nextState.gameOver) return -10;
   if (nextState.score > prevState.score) return 10;
-  return -0.1;
+
+  const prevDist = manhattanDistance(prevState.snake[0], prevState.food);
+  const nextDist = manhattanDistance(nextState.snake[0], nextState.food);
+
+  return prevDist > nextDist ? 0.1 : -0.15;
 }
 
 export function runEpisode(agent) {
