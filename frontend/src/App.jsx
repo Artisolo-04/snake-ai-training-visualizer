@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngine';
 import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
-import { createAgent, trainAgent } from './ai/qlearning';
+import { createAgent, trainAgentAsync } from './ai/qlearning';
 import { saveRun, listRuns, loadRun } from './api/runs';
 import RunSelector from './components/RunSelector';
 import Sparkline from './components/Sparkline';
@@ -9,6 +9,8 @@ import './index.css';
 
 const CELL_SIZE = 20;
 const TICK_MS = 120;
+const EPISODES_PER_TRAIN = 20000;
+const TRAIN_BATCH_SIZE = 100;
 
 function App() {
 
@@ -24,6 +26,7 @@ function App() {
   const [agent, setAgent] = useState(null);
   const [training, setTraining] = useState(false);
   const [trainedEpisodes, setTrainedEpisodes] = useState(0);
+  const [trainProgress, setTrainProgress] = useState(0);
 
   const [trainingHistory, setTrainingHistory] = useState([]);
   const [aiSpeed, setAiSpeed] = useState(80);
@@ -59,8 +62,8 @@ function App() {
   const restart = useCallback(() => {
     directionRef.current = DIRECTIONS.RIGHT;
     setGameState(createInitialState());
-    setStarted(false);
-  }, []);
+    setStarted(mode === 'ai' ? !!agent : false);
+  }, [mode, agent]);
 
 
   useEffect(() => {
@@ -142,18 +145,23 @@ function App() {
 
   const handleTrain = () => {
     setTraining(true);
+    setTrainProgress(0);
     setTimeout(async () => {
       const newAgent = createAgent();
-      const history = trainAgent(newAgent, 1000);
+      const history = await trainAgentAsync(newAgent, EPISODES_PER_TRAIN, {
+        batchSize: TRAIN_BATCH_SIZE,
+        onProgress: (done, total) => setTrainProgress(Math.round((done / total) * 100)),
+      });
       setAgent(newAgent);
-      setTrainedEpisodes(1000);
+      setTrainedEpisodes(EPISODES_PER_TRAIN);
       setTrainingHistory(history);
       setTraining(false);
+      setStarted(true);
 
       try {
         const bestScore = Math.max(...history.map((h) => h.score));
         await saveRun({
-          episodes: 1000,
+          episodes: EPISODES_PER_TRAIN,
           bestScore,
           finalEpsilon: newAgent.epsilon,
           qTable: Object.fromEntries(newAgent.qTable),
@@ -170,7 +178,7 @@ function App() {
     setMode(newMode);
     directionRef.current = DIRECTIONS.RIGHT;
     setGameState(createInitialState());
-    setStarted(newMode === 'ai');
+    setStarted(newMode === 'ai' && !!agent);
   };
 
   return (
@@ -215,7 +223,7 @@ function App() {
               disabled={training}
               className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
             >
-              {training ? 'Training…' : 'Train 1000 Episodes'}
+              {training ? `Training… ${trainProgress}%` : `Train ${EPISODES_PER_TRAIN} Episodes`}
             </button>
             {savedRuns.length > 0 && (
               <RunSelector runs={savedRuns} onSelect={handleLoadRun} />

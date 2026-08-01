@@ -68,7 +68,7 @@ export function runEpisode(agent) {
 
     gameState = nextGameState;
     steps++;
-    
+
   }
 
   agent.epsilon = Math.max(agent.epsilonMin, agent.epsilon * agent.epsilonDecay);
@@ -83,4 +83,29 @@ export function trainAgent(agent, episodes) {
     history.push(runEpisode(agent));
   }
   return history;
+}
+
+export function trainAgentAsync(agent, episodes, { batchSize = 100, onProgress } = {}) {
+  return new Promise((resolve) => {
+    const history = [];
+    let done = 0;
+
+    function runBatch() {
+      const end = Math.min(done + batchSize, episodes);
+      for (let i = done; i < end; i++) {
+        history.push(runEpisode(agent));
+      }
+      done = end;
+
+      if (onProgress) onProgress(done, episodes);
+
+      if (done < episodes) {
+        setTimeout(runBatch, 0);
+      } else {
+        resolve(history);
+      }
+    }
+
+    runBatch();
+  });
 }
