@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createInitialState, step, DIRECTIONS, GRID_SIZE } from './game/gameEngine';
+import { stepRelative, getAgentState, encodeState } from './game/agentInterface';
+import { createAgent, trainAgent } from './ai/qlearning';
 import './index.css';
 
 const CELL_SIZE = 20;
 const TICK_MS = 120;
+const AI_TICK_MS = 80;
 
 function App() {
+
   const canvasRef = useRef(null);
+
+  const [mode, setMode] = useState('manual');
   const [gameState, setGameState] = useState(createInitialState());
   const [started, setStarted] = useState(false);
   const directionRef = useRef(DIRECTIONS.RIGHT);
   const gameOverRef = useRef(false);
   gameOverRef.current = gameState.gameOver;
+
+  const [agent, setAgent] = useState(null);
+  const [training, setTraining] = useState(false);
+  const [trainedEpisodes, setTrainedEpisodes] = useState(0);
 
   const restart = useCallback(() => {
     directionRef.current = DIRECTIONS.RIGHT;
@@ -19,7 +29,9 @@ function App() {
     setStarted(false);
   }, []);
 
+
   useEffect(() => {
+    if (mode !== 'manual') return;
     const handleKeyDown = (e) => {
       if (gameOverRef.current) {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -38,15 +50,32 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [restart]);
+  }, [mode, restart]);
+
 
   useEffect(() => {
-    if (gameState.gameOver || !started) return;
+    if (mode !== 'manual' || gameState.gameOver || !started) return;
     const interval = setInterval(() => {
       setGameState((prev) => step(prev, directionRef.current));
     }, TICK_MS);
     return () => clearInterval(interval);
-  }, [gameState.gameOver, started]);
+  }, [mode, gameState.gameOver, started]);
+
+
+  useEffect(() => {
+    if (mode !== 'ai' || !agent || gameState.gameOver || !started) return;
+    const interval = setInterval(() => {
+      setGameState((prev) => {
+        const stateKey = encodeState(getAgentState(prev));
+        const qValues = agent.qTable.get(stateKey) || [0, 0, 0];
+        const bestActionIndex = qValues.indexOf(Math.max(...qValues));
+        const action = ['straight', 'left', 'right'][bestActionIndex];
+        return stepRelative(prev, action);
+      });
+    }, AI_TICK_MS);
+    return () => clearInterval(interval);
+  }, [mode, agent, gameState.gameOver, started]);
+
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -77,16 +106,76 @@ function App() {
     });
   }, [gameState]);
 
+
+  const handleTrain = () => {
+    setTraining(true);
+    setTimeout(() => {
+      const newAgent = createAgent();
+      trainAgent(newAgent, 1000);
+      setAgent(newAgent);
+      setTrainedEpisodes(1000);
+      setTraining(false);
+    }, 50);
+  };
+
+
+  const switchMode = (newMode) => {
+    setMode(newMode);
+    directionRef.current = DIRECTIONS.RIGHT;
+    setGameState(createInitialState());
+    setStarted(newMode === 'ai');
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-6 bg-ink text-text px-4">
       <div className="text-center">
         <p className="font-mono text-xs uppercase tracking-[0.3em] text-teal mb-2">
-          Specimen 001 // Manual Control
+          Specimen 001 // {mode === 'manual' ? 'Manual Control' : 'Autonomous Agent'}
         </p>
         <h1 className="font-display text-4xl font-bold tracking-tight">
           Snake Training Visualizer
         </h1>
       </div>
+
+      <div className="flex gap-2 font-mono text-xs uppercase tracking-widest">
+        <button
+          onClick={() => switchMode('manual')}
+          className={`px-4 py-2 rounded-sm border transition-colors ${
+            mode === 'manual'
+              ? 'bg-teal text-ink border-teal'
+              : 'border-line text-muted hover:text-text'
+          }`}
+        >
+          Manual
+        </button>
+        <button
+          onClick={() => switchMode('ai')}
+          className={`px-4 py-2 rounded-sm border transition-colors ${
+            mode === 'ai'
+              ? 'bg-teal text-ink border-teal'
+              : 'border-line text-muted hover:text-text'
+          }`}
+        >
+          AI Agent
+        </button>
+      </div>
+
+      {mode === 'ai' && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleTrain}
+            disabled={training}
+            className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
+          >
+            {training ? 'Training…' : 'Train 1000 Episodes'}
+          </button>
+          {trainedEpisodes > 0 && (
+            <span className="font-mono text-xs text-muted uppercase tracking-widest">
+              Trained on {trainedEpisodes} episodes · {agent.qTable.size} states learned
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="relative p-2">
         <span className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-amber"></span>
@@ -113,9 +202,11 @@ function App() {
             >
               Restart
             </button>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-muted">
-              or press Enter / Space
-            </p>
+            {mode === 'manual' && (
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                or press Enter / Space
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -135,7 +226,7 @@ function App() {
       </div>
 
       <p className="font-mono text-[10px] uppercase tracking-widest text-muted">
-        Arrow keys to steer
+        {mode === 'manual' ? 'Arrow keys to steer' : agent ? 'Watching trained agent' : 'Train the agent to begin'}
       </p>
     </div>
   );
