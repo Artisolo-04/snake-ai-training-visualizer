@@ -35,11 +35,19 @@ function App() {
   const [aiSpeed, setAiSpeed] = useState(80);
   const [savedRuns, setSavedRuns] = useState([]);
 
+  const [manualBestScore, setManualBestScore] = useState(0);
+
+  useEffect(() => {
+    setManualBestScore((prev) => Math.max(prev, gameState.score));
+  }, [gameState.score]);
+
   const bestScoreEver = Math.max(
     0,
+    manualBestScore,
     ...savedRuns.map((r) => r.best_score ?? 0),
     ...(trainingHistory.length ? [Math.max(...trainingHistory.map((h) => h.score))] : [])
   );
+  
   const avgLast100 = trainingHistory.length
     ? (
         trainingHistory.slice(-100).reduce((sum, h) => sum + h.score, 0) /
@@ -261,43 +269,43 @@ function App() {
         </button>
       </div>
 
-      {mode === 'ai' && (
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleTrain}
-              disabled={training}
-              className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
-            >
-              {training ? `Training… ${trainProgress}%` : `Train ${EPISODES_PER_TRAIN} Episodes`}
-            </button>
-            {training && (
-              <button
-                onClick={handleStopTraining}
-                className="px-4 py-2 border border-line text-danger hover:bg-danger/10 font-mono text-xs uppercase tracking-wide rounded-sm transition-colors"
-              >
-                Stop
-              </button>
-            )}
-            {savedRuns.length > 0 && (
-              <RunSelector runs={savedRuns} onSelect={handleLoadRun} />
+        {bestScoreEver > 0 && (
+          <div className="flex items-center gap-5 font-mono text-[10px] uppercase tracking-widest text-muted">
+            <span>
+              Best Ever <span className="text-amber text-xs">{String(bestScoreEver).padStart(3, '0')}</span>
+            </span>
+            {avgLast100 && (
+              <span>
+                Avg (last 100) <span className="text-teal text-xs">{avgLast100}</span>
+              </span>
             )}
           </div>
+        )}
 
-          {(bestScoreEver > 0 || avgLast100) && (
-            <div className="flex items-center gap-5 font-mono text-[10px] uppercase tracking-widest text-muted">
-              <span>
-                Best Ever <span className="text-amber text-xs">{String(bestScoreEver).padStart(3, '0')}</span>
-              </span>
-              {avgLast100 && (
-                <span>
-                  Avg (last 100) <span className="text-teal text-xs">{avgLast100}</span>
-                </span>
+        {mode === 'ai' && (
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleTrain}
+                disabled={training}
+                className="px-5 py-2 bg-amber hover:bg-amber/90 disabled:opacity-50 text-ink font-mono text-xs font-semibold uppercase tracking-wide rounded-sm transition-colors"
+              >
+                {training ? `Training… ${trainProgress}%` : `Train ${EPISODES_PER_TRAIN} Episodes`}
+              </button>
+              {training && (
+                <button
+                  onClick={handleStopTraining}
+                  className="px-4 py-2 border border-line text-danger hover:bg-danger/10 font-mono text-xs uppercase tracking-wide rounded-sm transition-colors"
+                >
+                  Stop
+                </button>
+              )}
+              {savedRuns.length > 0 && (
+                <RunSelector runs={savedRuns} onSelect={handleLoadRun} />
               )}
             </div>
-          )}
 
-          {trainingHistory.length > 0 && (
+            {trainingHistory.length > 0 && (
             <div className="flex gap-4">
               <Sparkline
                 data={trainingHistory.map((h) => h.score)}
